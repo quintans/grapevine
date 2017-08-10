@@ -18,6 +18,7 @@ import (
 	"github.com/imdario/mergo"
 	"github.com/quintans/gomsg"
 	"github.com/quintans/toolkit"
+	"github.com/quintans/toolkit/log"
 )
 
 var logger gomsg.Logger
@@ -28,7 +29,7 @@ func SetLogger(lgr gomsg.Logger) {
 }
 
 func init() {
-	SetLogger(gomsg.Log{Level: 2})
+	SetLogger(log.LoggerFor("github.com/quintans/grapevine"))
 }
 
 // defaults
@@ -70,9 +71,8 @@ type Peer struct {
 	sync.RWMutex
 	*gomsg.Server
 
-	cfg            Config
-	tcpAddr        string
-	requestTimeout time.Duration
+	cfg     Config
+	tcpAddr string
 	// peers ones will be used to listen
 	peers map[string]*node
 	// the server will be used to send
@@ -83,28 +83,27 @@ type Peer struct {
 
 func NewPeer(cfg Config) *Peer {
 	if cfg.Uuid == nil {
-		panic("Uuid must be defined")
+		cfg.Uuid = gomsg.NewUUID()
 	}
 
 	// apply defaults
 	mergo.Merge(&cfg, defaultConfig)
 
 	peer := &Peer{
-		Server:         gomsg.NewServer(),
-		cfg:            cfg,
-		peers:          make(map[string]*node),
-		handlers:       make(map[string][]interface{}),
-		requestTimeout: time.Second,
+		Server:   gomsg.NewServer(),
+		cfg:      cfg,
+		peers:    make(map[string]*node),
+		handlers: make(map[string][]interface{}),
 	}
 
 	return peer
 }
 
-func (peer *Peer) SetRequestTimeout(timeout time.Duration) {
-	peer.requestTimeout = timeout
+func (peer *Peer) Config() Config {
+	return peer.cfg
 }
 
-func (peer *Peer) Connect(tcpAddr string) {
+func (peer *Peer) Bind(tcpAddr string) <-chan error {
 	peer.tcpAddr = tcpAddr
 	logger.Infof("Binding at %s", tcpAddr)
 
@@ -114,11 +113,11 @@ func (peer *Peer) Connect(tcpAddr string) {
 	peer.Server.Handle(PING, func() {})
 
 	peer.serveUDP(peer.cfg.BeaconAddr, peer.beaconHandler)
-	peer.Server.OnBind = func(l net.Listener) {
+	peer.Server.AddBindListeners(func(l net.Listener) {
 		peer.startBeacon(peer.cfg.BeaconAddr)
-	}
+	})
 
-	peer.Server.Listen(tcpAddr)
+	return peer.Server.Listen(tcpAddr)
 }
 
 func (peer *Peer) checkPeer(uuid string, addr string) {
@@ -330,12 +329,4 @@ func (peer *Peer) Cancel(name string) {
 	for _, v := range peer.peers {
 		v.client.Cancel(name)
 	}
-}
-
-func (peer *Peer) Request(name string, payload interface{}, handler interface{}) <-chan error {
-	return peer.Server.RequestTimeout(name, payload, handler, peer.requestTimeout)
-}
-
-func (peer *Peer) RequestAll(name string, payload interface{}, handler interface{}) <-chan error {
-	return peer.Server.RequestAll(name, payload, handler, peer.requestTimeout)
 }

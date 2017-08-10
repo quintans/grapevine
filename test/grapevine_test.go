@@ -32,16 +32,15 @@ func TestGrapevine(t *testing.T) {
 	}
 
 	var greet = 0
-	var cfg = grapevine.Config{Uuid: gomsg.NewUUID()}
-	var cli1 = grapevine.NewPeer(cfg)
-	cli1.Handle(SERVICE_GREETING, func(greeting string) string {
+	var peer1 = grapevine.NewPeer(grapevine.Config{})
+	peer1.Handle(SERVICE_GREETING, func(greeting string) string {
 		greet++
 		return "#1: hi " + greeting
 	})
-	cli1.AddNewTopicListener(func(event gomsg.TopicEvent) {
+	peer1.AddNewTopicListener(func(event gomsg.TopicEvent) {
 		fmt.Println("=====> #1: remote topic: ", event.SourceAddr, event.Name)
 	})
-	cli1.Connect(":7001")
+	peer1.Bind(":7001")
 
 	/*
 		var cli2 = grapevine.NewPeer(uuid())
@@ -55,8 +54,8 @@ func TestGrapevine(t *testing.T) {
 
 	var uuid3 = gomsg.NewUUID()
 	var cfg3 = grapevine.Config{Uuid: uuid3}
-	var cli3 = grapevine.NewPeer(cfg3)
-	cli3.Handle(SERVICE_GREETING, mw, func(r *gomsg.Request) {
+	var peer3 = grapevine.NewPeer(cfg3)
+	peer3.Handle(SERVICE_GREETING, mw, func(r *gomsg.Request) {
 		fmt.Println("=====> Calling SERVICE_GREETING #3")
 		greet++
 		var greeting string
@@ -65,13 +64,13 @@ func TestGrapevine(t *testing.T) {
 		// direct in json format because I am lazy (it will be decoded)
 		r.SetReply([]byte("\"#3: hi " + greeting + "\""))
 	})
-	cli3.Connect(":7003")
+	peer3.Bind(":7003")
 	wait()
 
 	time.Sleep(time.Second * 2)
 
 	var replies = 0
-	<-cli1.RequestAll(SERVICE_GREETING, "#1", func(reply string) {
+	<-peer1.RequestAll(SERVICE_GREETING, "#1", func(reply string) {
 		replies++
 		var str = reply
 		if reply == "" {
@@ -95,11 +94,11 @@ func TestGrapevine(t *testing.T) {
 		}
 	*/
 
-	cli3.Destroy()
+	peer3.Destroy()
 	fmt.Println("Waiting...")
 	time.Sleep(time.Second * 2)
 	// does it reconnect?
-	cli3 = grapevine.NewPeer(cfg3)
-	cli3.Connect(":7003")
+	peer3 = grapevine.NewPeer(cfg3)
+	peer3.Bind(":7003")
 	time.Sleep(time.Second * 7)
 }
