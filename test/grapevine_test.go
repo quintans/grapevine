@@ -15,7 +15,8 @@ func wait() {
 }
 
 func init() {
-	log.Register("/", log.DEBUG).ShowCaller(true)
+	log.Register("/", log.INFO).ShowCaller(true)
+	grapevine.SetLogger(log.LoggerFor("github.com/quintans/grapevine"))
 }
 
 const (
@@ -96,7 +97,7 @@ func TestGrapevine(t *testing.T) {
 
 	peer3.Destroy()
 	fmt.Println("Waiting...")
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 5)
 	// does it reconnect?
 	peer3 = grapevine.NewPeer(cfg3)
 	peer3.Bind(":7003")
