@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/quintans/gomsg"
-	"github.com/quintans/gomsg/impl/brokerless"
+	"github.com/quintans/grapevine"
 	"github.com/quintans/toolkit/log"
 )
 
@@ -24,7 +24,7 @@ const (
 
 var codec = gomsg.JsonCodec{}
 
-func TestBrokerless(t *testing.T) {
+func TestGrapevine(t *testing.T) {
 	var mw = func(r *gomsg.Request) {
 		fmt.Println("##### Calling endpoint #####", r.Name)
 		defer fmt.Println("##### Called endpoint #####", r.Name)
@@ -32,8 +32,8 @@ func TestBrokerless(t *testing.T) {
 	}
 
 	var greet = 0
-	var cfg = brokerless.Config{Uuid: gomsg.NewUUID()}
-	var cli1 = brokerless.NewPeer(cfg)
+	var cfg = grapevine.Config{Uuid: gomsg.NewUUID()}
+	var cli1 = grapevine.NewPeer(cfg)
 	cli1.Handle(SERVICE_GREETING, func(greeting string) string {
 		greet++
 		return "#1: hi " + greeting
@@ -44,7 +44,7 @@ func TestBrokerless(t *testing.T) {
 	cli1.Connect(":7001")
 
 	/*
-		var cli2 = brokerless.NewPeer(uuid())
+		var cli2 = grapevine.NewPeer(uuid())
 		cli2.Handle(SERVICE_GREETING, func(greeting string) string {
 			return "#2: hi " + greeting
 		})
@@ -54,8 +54,8 @@ func TestBrokerless(t *testing.T) {
 	wait()
 
 	var uuid3 = gomsg.NewUUID()
-	var cfg3 = brokerless.Config{Uuid: uuid3}
-	var cli3 = brokerless.NewPeer(cfg3)
+	var cfg3 = grapevine.Config{Uuid: uuid3}
+	var cli3 = grapevine.NewPeer(cfg3)
 	cli3.Handle(SERVICE_GREETING, mw, func(r *gomsg.Request) {
 		fmt.Println("=====> Calling SERVICE_GREETING #3")
 		greet++
@@ -99,7 +99,7 @@ func TestBrokerless(t *testing.T) {
 	fmt.Println("Waiting...")
 	time.Sleep(time.Second * 2)
 	// does it reconnect?
-	cli3 = brokerless.NewPeer(cfg3)
+	cli3 = grapevine.NewPeer(cfg3)
 	cli3.Connect(":7003")
 	time.Sleep(time.Second * 7)
 }

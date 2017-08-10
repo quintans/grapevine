@@ -18,10 +18,18 @@ import (
 	"github.com/imdario/mergo"
 	"github.com/quintans/gomsg"
 	"github.com/quintans/toolkit"
-	"github.com/quintans/toolkit/log"
 )
 
-var logger = log.LoggerFor("github.com/quintans/gomsg/brokerless")
+var logger gomsg.Logger
+
+func SetLogger(lgr gomsg.Logger) {
+	logger = lgr
+	gomsg.SetLogger(lgr)
+}
+
+func init() {
+	SetLogger(gomsg.Log{Level: 2})
+}
 
 // defaults
 const (
