@@ -89,6 +89,7 @@ func NewPeer(cfg Config) *Peer {
 		peers:    make(map[string]*node),
 		handlers: make(map[string][]interface{}),
 	}
+	logger.Infof("Cluster=%s, UUID=%X", cfg.BeaconName, cfg.Uuid)
 
 	return peer
 }
@@ -166,7 +167,7 @@ func (peer *Peer) connectPeer(uuid string, addr string) error {
 	var cli = gomsg.NewClient()
 	var e = <-cli.Connect(addr)
 	if e != nil {
-		logger.Errorf("%s - unable to connect to %s", peer.tcpAddr, addr)
+		logger.Errorf("%s - Unable to connect to %s", peer.tcpAddr, addr)
 		return e
 	}
 	var n = &node{
@@ -235,34 +236,14 @@ func (peer *Peer) beaconHandler(src *net.UDPAddr, n int, b []byte) {
 	}
 }
 
-func (peer *Peer) Destroy() {
-	peer.Server.Destroy()
-	var conn = peer.udpConn
-	peer.udpConn = nil
-	if conn != nil {
-		conn.Close()
-	}
-	peer.Lock()
-	defer peer.Unlock()
-	for _, v := range peer.peers {
-		v.debouncer.Kill()
-		v.client.Destroy()
-	}
-	peer.peers = make(map[string]*node)
-	if peer.beaconTicker != nil {
-		peer.beaconTicker.Stop()
-	}
-	peer.beaconTicker = nil
-}
-
 func (peer *Peer) startBeacon() error {
-	addr, err := net.ResolveUDPAddr("udp4", peer.cfg.BeaconAddr)
+	addr, err := net.ResolveUDPAddr("udp", peer.cfg.BeaconAddr)
 	if err != nil {
-		return nil
+		return err
 	}
-	c, err := net.DialUDP("udp4", nil, addr)
+	c, err := net.DialUDP("udp", nil, addr)
 	if err != nil {
-		return nil
+		return err
 	}
 	var buf16 = make([]byte, 2)
 	var port = uint16(peer.Server.BindPort())
@@ -277,8 +258,7 @@ func (peer *Peer) startBeacon() error {
 	if peer.beaconTicker != nil {
 		peer.beaconTicker.Stop()
 	}
-	logger.Infof("[Grapevine] (Cluster=%s) Heartbeat on %s every %s",
-		peer.cfg.BeaconName,
+	logger.Infof("Heartbeat on %s every %s",
 		peer.cfg.BeaconAddr,
 		peer.cfg.BeaconInterval)
 	peer.beaconTicker = toolkit.NewDelayedTicker(0, peer.cfg.BeaconInterval, func(t time.Time) {
@@ -292,12 +272,12 @@ func (peer *Peer) startBeacon() error {
 }
 
 func (peer *Peer) serveUDP(hnd func(*net.UDPAddr, int, []byte)) error {
-	addr, err := net.ResolveUDPAddr("udp4", peer.cfg.BeaconAddr)
+	addr, err := net.ResolveUDPAddr("udp", peer.cfg.BeaconAddr)
 	if err != nil {
 		return err
 	}
 
-	l, err := net.ListenUDP("udp4", addr)
+	l, err := net.ListenUDP("udp", addr)
 	if err != nil {
 		return err
 	}
@@ -320,7 +300,7 @@ func (peer *Peer) serveUDP(hnd func(*net.UDPAddr, int, []byte)) error {
 }
 
 func (peer *Peer) Handle(name string, hnd ...interface{}) {
-	logger.Infof("[Grapevine] Registering handler for %s", name)
+	logger.Infof("Registering handler for %s", name)
 	peer.Lock()
 	defer peer.Unlock()
 
@@ -331,11 +311,31 @@ func (peer *Peer) Handle(name string, hnd ...interface{}) {
 }
 
 func (peer *Peer) Cancel(name string) {
-	logger.Infof("[Grapevine] Canceling handler for %s", name)
+	logger.Infof("Canceling handler for %s", name)
 	peer.Lock()
 	defer peer.Unlock()
 
 	for _, v := range peer.peers {
 		v.client.Cancel(name)
 	}
+}
+
+func (peer *Peer) Destroy() {
+	peer.Server.Destroy()
+	var conn = peer.udpConn
+	peer.udpConn = nil
+	if conn != nil {
+		conn.Close()
+	}
+	peer.Lock()
+	defer peer.Unlock()
+	for _, v := range peer.peers {
+		v.debouncer.Kill()
+		v.client.Destroy()
+	}
+	peer.peers = make(map[string]*node)
+	if peer.beaconTicker != nil {
+		peer.beaconTicker.Stop()
+	}
+	peer.beaconTicker = nil
 }
