@@ -21,13 +21,6 @@ import (
 	"github.com/quintans/toolkit/faults"
 )
 
-var logger gomsg.Logger
-
-func SetLogger(lgr gomsg.Logger) {
-	logger = lgr
-	gomsg.SetLogger(lgr)
-}
-
 // defaults
 const (
 	UuidSize = 16
@@ -90,7 +83,6 @@ func NewPeer(cfg Config) *Peer {
 		peers:    make(map[string]*node),
 		handlers: make(map[string][]interface{}),
 	}
-	logger.Infof("Cluster=%s, UUID=%X", cfg.BeaconName, cfg.Uuid)
 
 	return peer
 }
@@ -101,7 +93,7 @@ func (peer *Peer) Config() Config {
 
 func (peer *Peer) Bind(tcpAddr string) <-chan error {
 	peer.tcpAddr = tcpAddr
-	logger.Infof("Binding at %s", tcpAddr)
+	peer.Logger().Infof("Binding Cluster=%s, UUID=%X at %s", peer.cfg.BeaconName, peer.cfg.Uuid, tcpAddr)
 
 	// special case where we receive a targeted request
 	// when a peer tries to check if I exist
@@ -127,7 +119,7 @@ func (peer *Peer) checkPeer(uuid string, addr string) {
 
 	if n := peer.peers[uuid]; n != nil {
 		if addr != n.client.Address() {
-			logger.Infof("%s - OLD peer at %s", peer.tcpAddr, addr)
+			peer.Logger().Infof("%s - OLD peer at %s", peer.tcpAddr, addr)
 			// client reconnected with another address
 			n.client.Destroy()
 			n.debouncer.Kill()
@@ -137,7 +129,7 @@ func (peer *Peer) checkPeer(uuid string, addr string) {
 			peer.checkBeacon(n)
 		}
 	} else {
-		logger.Infof("%s - NEW peer at %s", peer.tcpAddr, addr)
+		peer.Logger().Infof("%s - NEW peer at %s", peer.tcpAddr, addr)
 		peer.connectPeer(uuid, addr)
 	}
 }
@@ -155,7 +147,7 @@ func (peer *Peer) checkBeacon(n *node) {
 		}
 		if n.beaconCountdown == 0 {
 			// the client responded, switching to UDP
-			logger.Infof("%s - Peer at %s responded. Switching to UDP listening", peer.tcpAddr, n.client.Address())
+			peer.Logger().Infof("%s - Peer at %s responded. Switching to UDP listening", peer.tcpAddr, n.client.Address())
 			// kill the TCP health check
 			n.debouncer.Kill()
 			peer.healthCheckByUDP(n)
@@ -168,7 +160,7 @@ func (peer *Peer) connectPeer(uuid string, addr string) error {
 	var cli = gomsg.NewClient()
 	var e = <-cli.Connect(addr)
 	if e != nil {
-		logger.Errorf("%s - Unable to connect to %s", peer.tcpAddr, addr)
+		peer.Logger().Errorf("%s - Unable to connect to %s", peer.tcpAddr, addr)
 		return e
 	}
 	var n = &node{
@@ -189,7 +181,7 @@ func (peer *Peer) dropPeer(n *node) {
 	peer.Lock()
 	defer peer.Unlock()
 
-	logger.Infof("%s - Droping unresponsive peer at %s", peer.tcpAddr, n.client.Address())
+	peer.Logger().Infof("%s - Droping unresponsive peer at %s", peer.tcpAddr, n.client.Address())
 	n.client.Destroy()
 	n.debouncer = nil
 	delete(peer.peers, n.uuid)
@@ -203,7 +195,7 @@ func (peer *Peer) healthCheckByTCP(n *node) {
 		}, peer.cfg.BeaconInterval)
 	})
 	n.debouncer = tk.NewDebounce(peer.cfg.BeaconMaxInterval, func(o interface{}) {
-		logger.Debugf("%s - Failed to contact by TCP peer at %s.", peer.tcpAddr, n.client.Address())
+		peer.Logger().Debugf("%s - Failed to contact by TCP peer at %s.", peer.tcpAddr, n.client.Address())
 		peer.dropPeer(n)
 	})
 	n.debouncer.OnExit = func() {
@@ -214,7 +206,7 @@ func (peer *Peer) healthCheckByTCP(n *node) {
 func (peer *Peer) healthCheckByUDP(n *node) {
 	n.debouncer = tk.NewDebounce(peer.cfg.BeaconMaxInterval, func(o interface{}) {
 		// the client did not responded, switching to TCP
-		logger.Debugf("%s - Silent peer at %s. Switching to TCP ping", peer.tcpAddr, n.client.Address())
+		peer.Logger().Debugf("%s - Silent peer at %s. Switching to TCP ping", peer.tcpAddr, n.client.Address())
 		n.beaconCountdown = peer.cfg.BeaconCountdown
 		peer.healthCheckByTCP(n)
 	})
@@ -259,13 +251,13 @@ func (peer *Peer) startBeacon() error {
 	if peer.beaconTicker != nil {
 		peer.beaconTicker.Stop()
 	}
-	logger.Infof("Heartbeat on %s every %s",
+	peer.Logger().Infof("Heartbeat on %s every %s",
 		peer.cfg.BeaconAddr,
 		peer.cfg.BeaconInterval)
 	peer.beaconTicker = tk.NewDelayedTicker(0, peer.cfg.BeaconInterval, func(t time.Time) {
 		var _, err = c.Write(data)
 		if err != nil {
-			logger.Errorf("Unable to write to UDP %s. Error: %+v", peer.cfg.BeaconAddr, faults.Wrap(err))
+			peer.Logger().Errorf("Unable to write to UDP %s. Error: %+v", peer.cfg.BeaconAddr, faults.Wrap(err))
 		}
 	})
 
@@ -291,7 +283,7 @@ func (peer *Peer) serveUDP(hnd func(*net.UDPAddr, int, []byte)) error {
 			if peer.udpConn == nil {
 				return
 			} else if err != nil {
-				logger.Errorf("%s - ReadFromUDP failed: %+v", peer.tcpAddr, faults.Wrap(err))
+				peer.Logger().Errorf("%s - ReadFromUDP failed: %+v", peer.tcpAddr, faults.Wrap(err))
 				return
 			}
 			hnd(src, n, payload)
@@ -301,7 +293,7 @@ func (peer *Peer) serveUDP(hnd func(*net.UDPAddr, int, []byte)) error {
 }
 
 func (peer *Peer) Handle(name string, hnd ...interface{}) {
-	logger.Infof("Registering handler for %s", name)
+	peer.Logger().Infof("Registering handler for %s", name)
 	peer.Lock()
 	defer peer.Unlock()
 
@@ -312,7 +304,7 @@ func (peer *Peer) Handle(name string, hnd ...interface{}) {
 }
 
 func (peer *Peer) Cancel(name string) {
-	logger.Infof("Canceling handler for %s", name)
+	peer.Logger().Infof("Canceling handler for %s", name)
 	peer.Lock()
 	defer peer.Unlock()
 
