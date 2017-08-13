@@ -4,13 +4,13 @@ brokerless cluster with service auto-discover using gomsg
 
 It is very easy to use.
 
-The Producer
+The provider
 ```go
-var producer = grapevine.NewPeer(grapevine.Config{})
-producer.Handle("GREETING", func(name string) string {
+var peer = grapevine.NewPeer(grapevine.Config{})
+peer.Handle("GREETING", func(name string) string {
 	return "Hello " + name
 })
-if err := <-producer.Bind(":7000"); err != nil {
+if err := <-peer.Bind(":7000"); err != nil {
 	panic(err)
 }
 ```
@@ -18,9 +18,9 @@ if err := <-producer.Bind(":7000"); err != nil {
 
 The consumer
 ```go
-var consumer = grapevine.NewPeer(grapevine.Config{})
+var peer = grapevine.NewPeer(grapevine.Config{})
 go func() {
-	if err := <-consumer.Bind(":8000"); err != nil {
+	if err := <-peer.Bind(":8000"); err != nil {
 		panic(err)
 	}
 }()
@@ -28,7 +28,7 @@ go func() {
 // give time for the Peer to connect
 time.Sleep(time.Second * 2)
 
-<-consumer.Request("GREETING", "Paulo", func(reply string) {
+<-peer.Request("GREETING", "Paulo", func(reply string) {
 	fmt.Println("Reply:", reply)
 })
 ```
