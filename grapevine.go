@@ -8,7 +8,7 @@ package grapevine
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
+	"encoding/hex"
 	"io"
 	"net"
 	"strconv"
@@ -224,7 +224,7 @@ func (peer *Peer) beaconHandler(src *net.UDPAddr, n int, b []byte) {
 			var buf16 = make([]byte, 2)
 			r.Read(buf16)
 			var port = int(binary.LittleEndian.Uint16(buf16))
-			peer.checkPeer(fmt.Sprintf("%X", uuid), src.IP.String()+":"+strconv.Itoa(port))
+			peer.checkPeer(hex.EncodeToString(uuid), src.IP.String()+":"+strconv.Itoa(port))
 		}
 	}
 }
