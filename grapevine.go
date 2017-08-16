@@ -9,9 +9,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/quintans/gomsg"
 	tk "github.com/quintans/toolkit"
 	"github.com/quintans/toolkit/faults"
+	"github.com/quintans/toolkit/log"
 )
 
 // defaults
@@ -158,6 +162,7 @@ func (peer *Peer) checkBeacon(n *node) {
 
 func (peer *Peer) connectPeer(uuid string, addr string) error {
 	var cli = gomsg.NewClient()
+	cli.SetLogger(peer.Logger())
 	var e = <-cli.Connect(addr)
 	if e != nil {
 		peer.Logger().Errorf("%s - Unable to connect to %s", peer.tcpAddr, addr)
@@ -174,6 +179,9 @@ func (peer *Peer) connectPeer(uuid string, addr string) error {
 	for k, v := range peer.handlers {
 		cli.Handle(k, v...)
 	}
+
+	peer.listPeers(addr)
+
 	return nil
 }
 
@@ -185,6 +193,46 @@ func (peer *Peer) dropPeer(n *node) {
 	n.client.Destroy()
 	n.debouncer = nil
 	delete(peer.peers, n.uuid)
+
+	peer.listPeers("")
+}
+
+func (peer *Peer) listPeers(addr string) {
+	if peer.Logger().IsActive(log.INFO) {
+		var arr = make([]*node, len(peer.peers))
+		var i = 0
+		for _, n := range peer.peers {
+			arr[i] = n
+			i++
+		}
+		sort.Slice(arr, func(i, j int) bool {
+			return strings.Compare(arr[i].client.Address(), arr[j].client.Address()) < 0
+		})
+
+		var buf bytes.Buffer
+		buf.WriteString(" {\n    ")
+		var peerAddr string
+		var ip, err = gomsg.IP()
+		if err == nil {
+			peerAddr = fmt.Sprintf("%s:%d", ip, peer.BindPort())
+		} else {
+			peerAddr = peer.BindAddress().String()
+		}
+		buf.WriteString(peerAddr)
+		buf.WriteString(" (this)\n")
+		for _, n := range arr {
+			buf.WriteString("    ")
+			var a = n.client.Address()
+			buf.WriteString(a)
+			if a == addr {
+				buf.WriteString(" (NEW)")
+			}
+			buf.WriteString("\n")
+		}
+		buf.WriteString(" }\n")
+
+		peer.Logger().Infof("Peers of %s\n%s", peer.cfg.BeaconName, buf.String())
+	}
 }
 
 // healthCheckByIP is the client that checks actively the remote peer
