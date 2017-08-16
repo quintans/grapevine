@@ -27,8 +27,9 @@ import (
 
 // defaults
 const (
-	UuidSize = 16
-	PING     = "PING"
+	UuidSize       = 16
+	PING           = "PING"
+	PeerAddressKey = "peer.address"
 )
 
 type node struct {
@@ -40,7 +41,7 @@ type node struct {
 }
 
 type Config struct {
-	Uuid                  []byte
+	Uuid                  tk.UUID
 	BeaconAddr            string
 	BeaconName            string
 	BeaconMaxDatagramSize int
@@ -57,7 +58,7 @@ type Peer struct {
 
 	cfg     Config
 	tcpAddr string
-	// peers ones will be used to listen
+	// peers that will be used to listen
 	peers map[string]*node
 	// the server will be used to send
 	udpConn      *net.UDPConn
@@ -66,7 +67,7 @@ type Peer struct {
 }
 
 func NewPeer(cfg Config) *Peer {
-	if cfg.Uuid == nil {
+	if cfg.Uuid.IsZero() {
 		cfg.Uuid = tk.NewUUID()
 	}
 
@@ -97,7 +98,7 @@ func (peer *Peer) Config() Config {
 
 func (peer *Peer) Bind(tcpAddr string) <-chan error {
 	peer.tcpAddr = tcpAddr
-	peer.Logger().Infof("Binding Cluster=%s, UUID=%X at %s", peer.cfg.BeaconName, peer.cfg.Uuid, tcpAddr)
+	peer.Logger().Infof("Binding Cluster=%s, UUID=%s at %s", peer.cfg.BeaconName, peer.cfg.Uuid, tcpAddr)
 
 	// special case where we receive a targeted request
 	// when a peer tries to check if I exist
@@ -119,21 +120,25 @@ func (peer *Peer) Bind(tcpAddr string) <-chan error {
 
 func (peer *Peer) checkPeer(uuid string, addr string) {
 	peer.Lock()
-	defer peer.Unlock()
-
+	var connect = false
 	if n := peer.peers[uuid]; n != nil {
 		if addr != n.client.Address() {
+			delete(peer.peers, uuid)
 			peer.Logger().Infof("%s - OLD peer at %s", peer.tcpAddr, addr)
 			// client reconnected with another address
 			n.client.Destroy()
 			n.debouncer.Kill()
-			delete(peer.peers, uuid)
-			peer.connectPeer(uuid, addr)
+			connect = true
 		} else {
 			peer.checkBeacon(n)
 		}
 	} else {
 		peer.Logger().Infof("%s - NEW peer at %s", peer.tcpAddr, addr)
+		connect = true
+	}
+	peer.Unlock()
+
+	if connect {
 		peer.connectPeer(uuid, addr)
 	}
 }
@@ -162,23 +167,34 @@ func (peer *Peer) checkBeacon(n *node) {
 
 func (peer *Peer) connectPeer(uuid string, addr string) error {
 	var cli = gomsg.NewClient()
+	cli.Metadata()[PeerAddressKey] = addr
 	cli.SetLogger(peer.Logger())
-	var e = <-cli.Connect(addr)
-	if e != nil {
-		peer.Logger().Errorf("%s - Unable to connect to %s", peer.tcpAddr, addr)
-		return e
-	}
 	var n = &node{
 		uuid:   uuid,
 		client: cli,
 	}
 	peer.healthCheckByUDP(n)
-	peer.peers[uuid] = n
 
+	peer.Lock()
+	peer.peers[uuid] = n
+	peer.Unlock()
+
+	// when it connects it will be already in peers
+	var e = <-cli.Connect(addr)
+	if e != nil {
+		//peer.Logger().Errorf("%s - Unable to connect to %s", peer.tcpAddr, addr)
+		peer.Lock()
+		delete(peer.peers, uuid)
+		peer.Unlock()
+		return e
+	}
+
+	peer.RLock()
 	// apply all handlers
 	for k, v := range peer.handlers {
 		cli.Handle(k, v...)
 	}
+	peer.RUnlock()
 
 	peer.listPeers(addr)
 
@@ -187,24 +203,27 @@ func (peer *Peer) connectPeer(uuid string, addr string) error {
 
 func (peer *Peer) dropPeer(n *node) {
 	peer.Lock()
-	defer peer.Unlock()
 
 	peer.Logger().Infof("%s - Droping unresponsive peer at %s", peer.tcpAddr, n.client.Address())
 	n.client.Destroy()
 	n.debouncer = nil
 	delete(peer.peers, n.uuid)
+	peer.Unlock()
 
 	peer.listPeers("")
 }
 
 func (peer *Peer) listPeers(addr string) {
 	if peer.Logger().IsActive(log.INFO) {
+		peer.RLock()
 		var arr = make([]*node, len(peer.peers))
 		var i = 0
 		for _, n := range peer.peers {
 			arr[i] = n
 			i++
 		}
+		peer.RUnlock()
+
 		sort.Slice(arr, func(i, j int) bool {
 			return strings.Compare(arr[i].client.Address(), arr[j].client.Address()) < 0
 		})
@@ -268,7 +287,7 @@ func (peer *Peer) beaconHandler(src *net.UDPAddr, n int, b []byte) {
 		var uuid = make([]byte, UuidSize)
 		r.Read(uuid)
 		// ignore self
-		if bytes.Compare(uuid, peer.cfg.Uuid) != 0 {
+		if bytes.Compare(uuid, peer.cfg.Uuid.Bytes()) != 0 {
 			var buf16 = make([]byte, 2)
 			r.Read(buf16)
 			var port = int(binary.LittleEndian.Uint16(buf16))
@@ -292,7 +311,7 @@ func (peer *Peer) startBeacon() error {
 
 	var buf bytes.Buffer
 	buf.WriteString(peer.cfg.BeaconName)
-	buf.Write(peer.cfg.Uuid)
+	buf.Write(peer.cfg.Uuid.Bytes())
 	buf.Write(buf16)
 
 	var data = buf.Bytes()
@@ -301,7 +320,8 @@ func (peer *Peer) startBeacon() error {
 	}
 	peer.Logger().Infof("Heartbeat on %s every %s",
 		peer.cfg.BeaconAddr,
-		peer.cfg.BeaconInterval)
+		peer.cfg.BeaconInterval,
+	)
 	peer.beaconTicker = tk.NewDelayedTicker(0, peer.cfg.BeaconInterval, func(t time.Time) {
 		var _, err = c.Write(data)
 		if err != nil {
@@ -325,8 +345,8 @@ func (peer *Peer) serveUDP(hnd func(*net.UDPAddr, int, []byte)) error {
 	l.SetReadBuffer(peer.cfg.BeaconMaxDatagramSize)
 	peer.udpConn = l
 	go func() {
+		var payload = make([]byte, peer.cfg.BeaconMaxDatagramSize)
 		for {
-			var payload = make([]byte, peer.cfg.BeaconMaxDatagramSize)
 			n, src, err := l.ReadFromUDP(payload)
 			if peer.udpConn == nil {
 				return
@@ -342,23 +362,24 @@ func (peer *Peer) serveUDP(hnd func(*net.UDPAddr, int, []byte)) error {
 
 func (peer *Peer) Handle(name string, hnd ...interface{}) {
 	peer.Logger().Infof("Registering handler for %s", name)
-	peer.Lock()
-	defer peer.Unlock()
 
+	peer.Lock()
 	peer.handlers[name] = hnd
 	for _, v := range peer.peers {
 		v.client.Handle(name, hnd)
 	}
+	peer.Unlock()
 }
 
 func (peer *Peer) Cancel(name string) {
 	peer.Logger().Infof("Canceling handler for %s", name)
-	peer.Lock()
-	defer peer.Unlock()
 
+	peer.Lock()
+	delete(peer.handlers, name)
 	for _, v := range peer.peers {
 		v.client.Cancel(name)
 	}
+	peer.Unlock()
 }
 
 func (peer *Peer) Destroy() {
@@ -369,12 +390,13 @@ func (peer *Peer) Destroy() {
 		conn.Close()
 	}
 	peer.Lock()
-	defer peer.Unlock()
 	for _, v := range peer.peers {
 		v.debouncer.Kill()
 		v.client.Destroy()
 	}
 	peer.peers = make(map[string]*node)
+	peer.Unlock()
+
 	if peer.beaconTicker != nil {
 		peer.beaconTicker.Stop()
 	}
