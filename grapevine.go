@@ -47,7 +47,7 @@ type Config struct {
 	BeaconMaxDatagramSize int
 	BeaconInterval        time.Duration
 	BeaconMaxInterval     time.Duration
-	// BeaconCountdown is the number of consecutive pings inside the ping window
+	// BeaconCountdown is the number of consecutive UDP pings inside the ping window
 	// to reactivate the UDP health check
 	BeaconCountdown int
 }
@@ -103,7 +103,9 @@ func (peer *Peer) Bind(tcpAddr string) <-chan error {
 	// special case where we receive a targeted request
 	// when a peer tries to check if I exist
 	// because it did not received the beacon in time
-	peer.Server.Handle(PING, func() {})
+	peer.Server.Handle(PING, func(uuid []byte) bool {
+		return bytes.Compare(uuid, peer.cfg.Uuid.Bytes()) == 0
+	})
 
 	var err = peer.serveUDP(peer.beaconHandler)
 	if err != nil {
@@ -139,7 +141,10 @@ func (peer *Peer) checkPeer(uuid string, addr string) {
 	peer.Unlock()
 
 	if connect {
-		peer.connectPeer(uuid, addr)
+		var err = peer.connectPeer(uuid, addr)
+		if err != nil {
+			peer.Logger().Errorf("Unable to connect to peer at %s: %+v", addr, err)
+		}
 	}
 }
 
@@ -167,7 +172,13 @@ func (peer *Peer) checkBeacon(n *node) {
 
 func (peer *Peer) connectPeer(uuid string, addr string) error {
 	var cli = gomsg.NewClient()
-	cli.Metadata()[PeerAddressKey] = addr
+	// register peer public IP:Port
+	var ip, err = gomsg.IP()
+	if err != nil {
+		return err
+	}
+	cli.Metadata()[PeerAddressKey] = ip + ":" + strconv.Itoa(peer.BindPort())
+
 	cli.SetLogger(peer.Logger())
 	var n = &node{
 		uuid:   uuid,
@@ -182,7 +193,6 @@ func (peer *Peer) connectPeer(uuid string, addr string) error {
 	// when it connects it will be already in peers
 	var e = <-cli.Connect(addr)
 	if e != nil {
-		//peer.Logger().Errorf("%s - Unable to connect to %s", peer.tcpAddr, addr)
 		peer.Lock()
 		delete(peer.peers, uuid)
 		peer.Unlock()
@@ -206,6 +216,7 @@ func (peer *Peer) dropPeer(n *node) {
 
 	peer.Logger().Infof("%s - Droping unresponsive peer at %s", peer.tcpAddr, n.client.Address())
 	n.client.Destroy()
+	// no need to kill the debouncer. If this was called, it means it fired.
 	n.debouncer = nil
 	delete(peer.peers, n.uuid)
 	peer.Unlock()
@@ -256,9 +267,15 @@ func (peer *Peer) listPeers(addr string) {
 
 // healthCheckByIP is the client that checks actively the remote peer
 func (peer *Peer) healthCheckByTCP(n *node) {
+	var uuid = n.client.RemoteUuid().Bytes()
 	var ticker = tk.NewTicker(peer.cfg.BeaconInterval, func(t time.Time) {
-		<-n.client.RequestTimeout(PING, nil, func() {
-			n.debouncer.Delay(nil)
+		<-n.client.RequestTimeout(PING, uuid, func(ok bool) {
+			if ok {
+				n.debouncer.Delay(nil)
+			} else {
+				peer.Logger().Debugf("Peer with UUID %x at %s no longer valid.", uuid, n.client.Address())
+				n.debouncer.Kill()
+			}
 		}, peer.cfg.BeaconInterval)
 	})
 	n.debouncer = tk.NewDebounce(peer.cfg.BeaconMaxInterval, func(o interface{}) {
