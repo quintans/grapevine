@@ -179,7 +179,7 @@ func (peer *Peer) connectPeer(uuid string, addr string) error {
 	}
 	cli.Metadata()[PeerAddressKey] = ip + ":" + strconv.Itoa(peer.BindPort())
 
-	cli.SetLogger(peer.Logger())
+	cli.SetLogger(log.Wrap{peer.Logger().CallerAt(2), "{Client@" + addr + "}"})
 	var n = &node{
 		uuid:   uuid,
 		client: cli,
