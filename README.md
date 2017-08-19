@@ -1,11 +1,9 @@
 # grapevine
-brokerless cluster with service auto-discover using gomsg
+Brokerless (p2p) cluster with service auto-discover and failure resilient implemented in gomsg
 
-The cluster is implemented using **gomsg**.
+It is very easy to use, with very little configuration.
 
-It is very easy to use.
-
-The provider
+**The provider**
 ```go
 var peer = grapevine.NewPeer(grapevine.Config{})
 peer.Handle("GREETING", func(name string) string {
@@ -17,7 +15,7 @@ if err := <-peer.Bind(":7000"); err != nil {
 ```
 
 
-The consumer
+**The consumer**
 ```go
 var peer = grapevine.NewPeer(grapevine.Config{})
 go func() {
@@ -34,7 +32,7 @@ time.Sleep(time.Second)
 })
 ```
 
-### Details
+## Details
 Auto discovery is implemented by a UDP heartbeat that every node emits.
 When a node receives a heartbeat from a new node, it connects to it.
 
