@@ -32,6 +32,8 @@ const (
 	PeerAddressKey = "peer.address"
 )
 
+type PeerListener func(*gomsg.Client)
+
 type node struct {
 	uuid            string
 	client          *gomsg.Client
@@ -61,9 +63,12 @@ type Peer struct {
 	// peers that will be used to listen
 	peers map[string]*node
 	// the server will be used to send
-	udpConn      *net.UDPConn
-	handlers     map[string][]interface{}
-	beaconTicker *tk.Ticker
+	udpConn           *net.UDPConn
+	handlers          map[string][]interface{}
+	beaconTicker      *tk.Ticker
+	newPeerListeners  map[uint64]PeerListener
+	dropPeerListeners map[uint64]PeerListener
+	listenersIdx      uint64
 }
 
 func NewPeer(cfg Config) *Peer {
@@ -83,13 +88,79 @@ func NewPeer(cfg Config) *Peer {
 	mergo.Merge(&cfg, defaultConfig)
 
 	peer := &Peer{
-		Server:   gomsg.NewServer(),
-		cfg:      cfg,
-		peers:    make(map[string]*node),
-		handlers: make(map[string][]interface{}),
+		Server: gomsg.NewServer(),
+		cfg:    cfg,
 	}
 
+	peer.reset()
+
 	return peer
+}
+
+func (this *Peer) reset() {
+	this.peers = make(map[string]*node)
+	this.handlers = make(map[string][]interface{})
+	this.newPeerListeners = make(map[uint64]PeerListener)
+	this.dropPeerListeners = make(map[uint64]PeerListener)
+	this.listenersIdx = 0
+}
+
+func (this *Peer) AddNewPeerListener(listener PeerListener) uint64 {
+	this.Lock()
+	defer this.Unlock()
+
+	this.listenersIdx++
+	this.newPeerListeners[this.listenersIdx] = listener
+	return this.listenersIdx
+}
+
+// RemoveSendListener removes a previously added listener on send messages
+func (this *Peer) RemoveNewPeerListener(idx uint64) {
+	this.Lock()
+	delete(this.newPeerListeners, idx)
+	this.Unlock()
+}
+
+func (this *Peer) fireNewPeerListener(cli *gomsg.Client) {
+	for _, listener := range clonePeerListeners(this.RWMutex, this.newPeerListeners) {
+		listener(cli)
+	}
+}
+
+func (this *Peer) AddDropPeerListener(listener PeerListener) uint64 {
+	this.Lock()
+	defer this.Unlock()
+
+	this.listenersIdx++
+	this.dropPeerListeners[this.listenersIdx] = listener
+	return this.listenersIdx
+}
+
+// RemoveSendListener removes a previously added listener on send messages
+func (this *Peer) RemoveDropPeerListener(idx uint64) {
+	this.Lock()
+	defer this.Unlock()
+
+	delete(this.dropPeerListeners, idx)
+}
+
+func (this *Peer) fireDropPeerListener(cli *gomsg.Client) {
+	for _, listener := range clonePeerListeners(this.RWMutex, this.dropPeerListeners) {
+		listener(cli)
+	}
+}
+
+func clonePeerListeners(mu sync.RWMutex, m map[uint64]PeerListener) []PeerListener {
+	mu.RLock()
+	arr := make([]PeerListener, len(m))
+	var i = 0
+	for _, v := range m {
+		arr[i] = v
+		i++
+	}
+	mu.RUnlock()
+
+	return arr
 }
 
 func (peer *Peer) Config() Config {
@@ -177,6 +248,11 @@ func (peer *Peer) connectPeer(uuid string, addr string) error {
 	if err != nil {
 		return err
 	}
+	// copy metada
+	var md = cli.Metadata()
+	for k, v := range peer.Metadata() {
+		md[k] = v
+	}
 	cli.Metadata()[PeerAddressKey] = ip + ":" + strconv.Itoa(peer.BindPort())
 
 	cli.SetLogger(log.Wrap{peer.Logger().CallerAt(2), "{Client@" + addr + "}"})
@@ -208,12 +284,15 @@ func (peer *Peer) connectPeer(uuid string, addr string) error {
 
 	peer.listPeers(addr)
 
+	peer.fireNewPeerListener(cli)
+
 	return nil
 }
 
 func (peer *Peer) dropPeer(n *node) {
-	peer.Lock()
+	peer.fireDropPeerListener(n.client)
 
+	peer.Lock()
 	peer.Logger().Infof("%s - Droping unresponsive peer at %s", peer.tcpAddr, n.client.Address())
 	n.client.Destroy()
 	// no need to kill the debouncer. If this was called, it means it fired.
@@ -222,6 +301,7 @@ func (peer *Peer) dropPeer(n *node) {
 	peer.Unlock()
 
 	peer.listPeers("")
+
 }
 
 func (peer *Peer) listPeers(addr string) {
@@ -406,16 +486,16 @@ func (peer *Peer) Destroy() {
 	if conn != nil {
 		conn.Close()
 	}
+	if peer.beaconTicker != nil {
+		peer.beaconTicker.Stop()
+	}
+	peer.beaconTicker = nil
+
 	peer.Lock()
 	for _, v := range peer.peers {
 		v.debouncer.Kill()
 		v.client.Destroy()
 	}
-	peer.peers = make(map[string]*node)
+	peer.reset()
 	peer.Unlock()
-
-	if peer.beaconTicker != nil {
-		peer.beaconTicker.Stop()
-	}
-	peer.beaconTicker = nil
 }
