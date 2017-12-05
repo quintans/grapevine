@@ -80,7 +80,7 @@ func NewPeer(cfg Config) *Peer {
 	var defaultConfig = Config{
 		BeaconMaxDatagramSize: 1024,
 		BeaconAddr:            "224.0.0.1:9999",
-		BeaconName:            "Beacon",
+		BeaconName:            "grapevine",
 		BeaconInterval:        time.Second,
 		BeaconMaxInterval:     time.Second * 2,
 		BeaconCountdown:       3,

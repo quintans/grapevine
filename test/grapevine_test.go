@@ -16,7 +16,6 @@ func wait() {
 
 func init() {
 	log.Register("/", log.INFO).ShowCaller(true)
-	grapevine.SetLogger(log.LoggerFor("github.com/quintans/grapevine"))
 }
 
 const (
