@@ -1,10 +1,9 @@
 package main
 
 import (
-	"flag"
-
 	"github.com/quintans/grapevine"
 	"github.com/quintans/grapevine/examples/echo"
+	"github.com/quintans/toolkit"
 	"github.com/quintans/toolkit/log"
 )
 
@@ -13,18 +12,18 @@ func init() {
 }
 
 func main() {
-	var addr = flag.String("addr", ":55000", "echo-server address [ip]:port")
-	flag.Parse()
-
+	var config grapevine.Config
+	if err := toolkit.LoadConfiguration(&config, "echo-service.json", true); err != nil {
+		panic(err)
+	}
 	var logger = log.LoggerFor("echo-service")
-	var peer = grapevine.NewPeer(grapevine.Config{})
+	var peer = grapevine.NewPeer(config)
 	peer.SetLogger(logger)
 	peer.Handle(shared.SERVICE_ECHO, func(greeting string) string {
 		return "Hi " + greeting + "!"
 	})
 
-	logger.Infof("Echo server at %s", *addr)
-	if err := <-peer.Bind(*addr); err != nil {
+	if err := <-peer.Bind(); err != nil {
 		panic(err)
 	}
 }

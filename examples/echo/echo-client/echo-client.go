@@ -6,6 +6,7 @@ import (
 	"github.com/quintans/gomsg"
 	"github.com/quintans/grapevine"
 	"github.com/quintans/grapevine/examples/echo"
+	"github.com/quintans/toolkit"
 	"github.com/quintans/toolkit/log"
 )
 
@@ -15,11 +16,14 @@ func init() {
 
 func main() {
 	var name = flag.String("name", "Paulo", "echo-client name")
-	var addr = flag.String("addr", ":55001", "echo-client address [ip]:port")
 	flag.Parse()
 
 	var logger = log.LoggerFor("echo-client")
-	var peer = grapevine.NewPeer(grapevine.Config{})
+	var config grapevine.Config
+	if err := toolkit.LoadConfiguration(&config, "echo-client.json", true); err != nil {
+		panic(err)
+	}
+	var peer = grapevine.NewPeer(config)
 	peer.SetLogger(logger)
 
 	// listen to the appearence of topics
@@ -35,8 +39,7 @@ func main() {
 		}
 	})
 
-	logger.Infof("Echo client at %s", *addr)
-	if err := <-peer.Bind(*addr); err != nil {
+	if err := <-peer.Bind(); err != nil {
 		panic(err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/quintans/gomsg"
 	"github.com/quintans/grapevine"
+	"github.com/quintans/toolkit"
 	"github.com/quintans/toolkit/log"
 )
 
@@ -32,15 +33,17 @@ func TestGrapevine(t *testing.T) {
 	}
 
 	var greet = 0
-	var peer1 = grapevine.NewPeer(grapevine.Config{})
+	var peer1 = grapevine.NewPeer(grapevine.Config{
+		Addr: ":7001",
+	})
 	peer1.Handle(SERVICE_GREETING, func(greeting string) string {
 		greet++
 		return "#1: hi " + greeting
 	})
 	peer1.AddNewTopicListener(func(event gomsg.TopicEvent) {
-		fmt.Println("=====> #1: remote topic: ", event.SourceAddr, event.Name)
+		fmt.Println("=====> #1: remote topic: ", event.Name)
 	})
-	peer1.Bind(":7001")
+	peer1.Bind()
 
 	/*
 		var cli2 = grapevine.NewPeer(uuid())
@@ -52,8 +55,8 @@ func TestGrapevine(t *testing.T) {
 
 	wait()
 
-	var uuid3 = gomsg.NewUUID()
-	var cfg3 = grapevine.Config{Uuid: uuid3}
+	var uuid3 = toolkit.NewUUID()
+	var cfg3 = grapevine.Config{Uuid: uuid3, Addr: ":7003"}
 	var peer3 = grapevine.NewPeer(cfg3)
 	peer3.Handle(SERVICE_GREETING, mw, func(r *gomsg.Request) {
 		fmt.Println("=====> Calling SERVICE_GREETING #3")
@@ -64,7 +67,7 @@ func TestGrapevine(t *testing.T) {
 		// direct in json format because I am lazy (it will be decoded)
 		r.SetReply([]byte("\"#3: hi " + greeting + "\""))
 	})
-	peer3.Bind(":7003")
+	peer3.Bind()
 	wait()
 
 	time.Sleep(time.Second * 2)
@@ -99,6 +102,6 @@ func TestGrapevine(t *testing.T) {
 	time.Sleep(time.Second * 5)
 	// does it reconnect?
 	peer3 = grapevine.NewPeer(cfg3)
-	peer3.Bind(":7003")
+	peer3.Bind()
 	time.Sleep(time.Second * 7)
 }
