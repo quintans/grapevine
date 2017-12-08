@@ -441,7 +441,7 @@ func (peer *Peer) serveUDP(hnd func(*net.UDPAddr, int, []byte)) error {
 		return faults.Wrap(err)
 	}
 
-	l, err := net.ListenUDP("udp", addr)
+	l, err := net.ListenMulticastUDP("udp", nil, addr)
 	if err != nil {
 		return faults.Wrap(err)
 	}
